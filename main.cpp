@@ -2,6 +2,9 @@
 #include <vector>
 #include <opencv2/opencv.hpp>
 
+#ifdef _OPENMP
+    #include <omp.h>
+#endif
 cv::Mat createCollage(cv::Mat sourceImage, int brightnessMultiplier)
 {
     if ( sourceImage.size().empty())
@@ -58,6 +61,7 @@ cv::Mat createCollage(cv::Mat sourceImage, int brightnessMultiplier)
     //std::cout << "Sum of all pixels: " << sumOfAllPixels << "\nAverage brightness: " << avgBrightness << std::endl;
     beta = avgBrightness * ( brightnessMultiplier - 1 );
     //
+    #pragma omp parallel for
     for( int y = 0; y < sourceImage.rows; y++ ) {
             for( int x = 0; x < sourceImage.cols; x++ ) {
                 for( int c = 0; c < sourceImage.channels(); c++ ) {
@@ -105,7 +109,7 @@ int main()
            videoFromFile >> currentFrame;
            if(currentFrame.empty())
                break;
-           outputVideo.write(createCollage(currentFrame, brightnessMultiplier));
+           outputVideo << createCollage(currentFrame, brightnessMultiplier);
        }
        videoFromFile.release();
        outputVideo.release();
