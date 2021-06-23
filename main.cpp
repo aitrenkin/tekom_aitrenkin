@@ -1,12 +1,122 @@
 #include <iostream>
 #include <vector>
+#include <fstream>
+//
 #include <opencv2/opencv.hpp>
-
+//
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+//
 #ifdef _OPENMP
     #include <omp.h>
 #endif
+//
+const char *http200_ok = "HTTP/1.1 200 OK\
+                         Content-Length: 0\
+                         Content-Type: text/html";
+
+const char *http404_not_found = "HTTP/1.1 404 Not found\
+                         Content-Length: 0\
+                         Content-Type: text/html";
+
+//
+bool is_file_exist(const char *fileName)
+{
+    std::ifstream infile(fileName);
+    return infile.good();
+}
+//
+void processCommandsFromNetwork()
+{
+        int sock, listener;
+        struct sockaddr_in addr;
+        char buf[1024];
+        int bytes_read;
+
+        listener = socket(AF_INET, SOCK_STREAM, 0);
+        if(listener < 0)
+        {
+            std::cout << "Can not create socket!" << std::endl;
+            return;
+        }
+
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(8081);
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        if(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+        {
+            std::cout << "Can not bind to address!" << std::endl;
+            exit(2);
+        }
+
+        listen(listener, 1);
+
+        while(true)
+        {
+            sock = accept(listener, NULL, NULL);
+            if(sock < 0)
+            {
+                std::cout << "Accept problem!" << std::endl;
+                exit(3);
+            }
+            std::string postRequest;
+            while(true)
+            {
+                bytes_read = recv(sock, buf, 1024, 0);
+                if(bytes_read <= 0) break;
+                postRequest += buf;
+            }
+
+            if(postRequest.find("\r\n") != std::string::npos)
+            {
+                auto paramsString = postRequest.substr(postRequest.find("\r\n") + 2);
+                const std::string filePathTag = "input_video=";
+                auto posOfFilePath = paramsString.find(filePathTag);
+                if(posOfFilePath !=  std::string::npos)
+                {
+                    auto posOfDelimeter = paramsString.find("&");
+                    if(posOfDelimeter != std::string::npos)
+                    {
+                        auto startOfPath = posOfFilePath + filePathTag.length();
+                        auto fullFilePath = paramsString.substr(startOfPath,
+                                                                posOfDelimeter - startOfPath);
+                        std::cout << "filepath: " << fullFilePath << std::endl;
+                        const std::string brightnessMultiplicatorTag = "brightness_multiplicator=";
+                        auto posOfBrightnessMultiplicator = paramsString.find(brightnessMultiplicatorTag);
+                        if(posOfBrightnessMultiplicator != std::string::npos)
+                        {
+                            auto startOfMultiplicator = posOfBrightnessMultiplicator +
+                                                        brightnessMultiplicatorTag.length();
+                            auto multiplicatorStringValue = paramsString.substr(startOfMultiplicator);
+                            std::cout << "Multiplicator: " << multiplicatorStringValue << std::endl;
+                            //все параметры получены, проверяем наличие файла
+                            if(is_file_exist(fullFilePath.c_str()))//отправляем ОК 200 обратно
+                            {
+                                send(sock, http200_ok, strlen(http200_ok), 0);
+                                //обрабатываем видео
+
+                            }
+                            else
+                            {
+                                send(sock, http404_not_found, strlen(http404_not_found), 0);
+                            }
+                        }
+                    }
+                }
+            }
+            std::cout.flush();
+            close(sock);
+        }
+}
+//
 cv::Mat createCollage(cv::Mat sourceImage, int brightnessMultiplier)
 {
+
+    //
+    processCommandsFromNetwork();
+    //
     if ( sourceImage.size().empty())
         return cv::Mat();
 
@@ -83,6 +193,12 @@ cv::Mat createCollage(cv::Mat sourceImage, int brightnessMultiplier)
                    imageWithIncreasedBrightness.size().width, imageWithIncreasedBrightness.size().height)));
     return resultedCollage;
 }
+
+void createVideoCollage(const std::string sourceVideo, unsigned brightnessMultiplier)
+{
+    ;//
+}
+
 int main()
 {
        unsigned brightnessMultiplier = 3; // тот самый множитель, который мы получаем извне
