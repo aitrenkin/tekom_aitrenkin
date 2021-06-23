@@ -27,96 +27,9 @@ bool is_file_exist(const char *fileName)
     std::ifstream infile(fileName);
     return infile.good();
 }
-//
-void processCommandsFromNetwork()
-{
-        int sock, listener;
-        struct sockaddr_in addr;
-        char buf[1024];
-        int bytes_read;
 
-        listener = socket(AF_INET, SOCK_STREAM, 0);
-        if(listener < 0)
-        {
-            std::cout << "Can not create socket!" << std::endl;
-            return;
-        }
-
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(8081);
-        addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        if(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-        {
-            std::cout << "Can not bind to address!" << std::endl;
-            exit(2);
-        }
-
-        listen(listener, 1);
-
-        while(true)
-        {
-            sock = accept(listener, NULL, NULL);
-            if(sock < 0)
-            {
-                std::cout << "Accept problem!" << std::endl;
-                exit(3);
-            }
-            std::string postRequest;
-            while(true)
-            {
-                bytes_read = recv(sock, buf, 1024, 0);
-                if(bytes_read <= 0) break;
-                postRequest += buf;
-            }
-
-            if(postRequest.find("\r\n") != std::string::npos)
-            {
-                auto paramsString = postRequest.substr(postRequest.find("\r\n") + 2);
-                const std::string filePathTag = "input_video=";
-                auto posOfFilePath = paramsString.find(filePathTag);
-                if(posOfFilePath !=  std::string::npos)
-                {
-                    auto posOfDelimeter = paramsString.find("&");
-                    if(posOfDelimeter != std::string::npos)
-                    {
-                        auto startOfPath = posOfFilePath + filePathTag.length();
-                        auto fullFilePath = paramsString.substr(startOfPath,
-                                                                posOfDelimeter - startOfPath);
-                        std::cout << "filepath: " << fullFilePath << std::endl;
-                        const std::string brightnessMultiplicatorTag = "brightness_multiplicator=";
-                        auto posOfBrightnessMultiplicator = paramsString.find(brightnessMultiplicatorTag);
-                        if(posOfBrightnessMultiplicator != std::string::npos)
-                        {
-                            auto startOfMultiplicator = posOfBrightnessMultiplicator +
-                                                        brightnessMultiplicatorTag.length();
-                            auto multiplicatorStringValue = paramsString.substr(startOfMultiplicator);
-                            std::cout << "Multiplicator: " << multiplicatorStringValue << std::endl;
-                            //все параметры получены, проверяем наличие файла
-                            if(is_file_exist(fullFilePath.c_str()))//отправляем ОК 200 обратно
-                            {
-                                send(sock, http200_ok, strlen(http200_ok), 0);
-                                //обрабатываем видео
-
-                            }
-                            else
-                            {
-                                send(sock, http404_not_found, strlen(http404_not_found), 0);
-                            }
-                        }
-                    }
-                }
-            }
-            std::cout.flush();
-            close(sock);
-        }
-}
-//
 cv::Mat createCollage(cv::Mat sourceImage, int brightnessMultiplier)
 {
-
-    //
-    processCommandsFromNetwork();
-    //
     if ( sourceImage.size().empty())
         return cv::Mat();
 
@@ -193,49 +106,151 @@ cv::Mat createCollage(cv::Mat sourceImage, int brightnessMultiplier)
                    imageWithIncreasedBrightness.size().width, imageWithIncreasedBrightness.size().height)));
     return resultedCollage;
 }
-
-void createVideoCollage(const std::string sourceVideo, unsigned brightnessMultiplier)
+//
+bool getBaseDirAndFileName(const std::string fullpath, std::string &baseDir, std::string &fileName)
 {
-    ;//
+    if(fullpath.find_last_of("/") + 1 > fullpath.length())
+        return false;
+    fileName = fullpath.substr(fullpath.find_last_of("/") + 1);
+    baseDir = fullpath.substr(0, fullpath.find_last_of("/") + 1);
+    return true;
+}
+//
+bool getFileNameAndExtension(const std::string fileNameWithExtension, std::string &fileName, std::string &extension)
+{
+    auto dotPos = fileNameWithExtension.find(".");
+    if( dotPos == std::string::npos)
+        return false;
+    fileName = fileNameWithExtension.substr(0, dotPos);
+    extension = fileNameWithExtension.substr(dotPos + 1);
+    return true;
+}
+bool createVideoCollage(const std::string sourceVideoPath, unsigned brightnessMultiplier)
+{
+    cv::VideoCapture videoFromFile(sourceVideoPath);
+    if(!videoFromFile.isOpened())
+    {
+        std::cout << "Can not open video" << std::endl;
+        return false;
+    }
+
+    int frameWidth = videoFromFile.get(cv::CAP_PROP_FRAME_WIDTH) * 3;
+    int frameHeight = videoFromFile.get(cv::CAP_PROP_FRAME_HEIGHT);
+    int originalVideoFrameRate = videoFromFile.get(cv::CAP_PROP_FPS);
+    cv::Mat currentFrame;
+    //
+    std::string baseDir, fileName;
+    if(!getBaseDirAndFileName(sourceVideoPath, baseDir, fileName))
+        return false;
+    //
+    std::string fileNameWithoutExtension, fileExtension;
+    if(!getFileNameAndExtension(fileName, fileNameWithoutExtension, fileExtension))
+        return false;
+    cv::VideoWriter outputVideo(baseDir + fileNameWithoutExtension +"_processed" + "." + fileExtension,
+                                cv::VideoWriter::fourcc('M','J','P','G'),originalVideoFrameRate, cv::Size(frameWidth, frameHeight));
+    if(!outputVideo.isOpened())
+    {
+        std::cout << "Can not open video output file" << std::endl;
+        return false;
+    }
+    while(true) // покадрово
+    {
+        videoFromFile >> currentFrame;
+        if(currentFrame.empty())
+            break;
+        outputVideo << createCollage(currentFrame, brightnessMultiplier);
+    }
+    videoFromFile.release();
+    outputVideo.release();
+    return true;
 }
 
+//
+void processCommandsFromNetwork()
+{
+        int sock, listener;
+        struct sockaddr_in addr;
+        char buf[1024];
+        int bytes_read;
+
+        listener = socket(AF_INET, SOCK_STREAM, 0);
+        if(listener < 0)
+        {
+            std::cout << "Can not create socket!" << std::endl;
+            return;
+        }
+
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(8081);
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        if(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+        {
+            std::cout << "Can not bind to address!" << std::endl;
+            exit(2);
+        }
+
+        listen(listener, 1);
+
+        while(true)
+        {
+            sock = accept(listener, NULL, NULL);
+            if(sock < 0)
+            {
+                std::cout << "Accept problem!" << std::endl;
+                exit(3);
+            }
+            std::string postRequest;
+            while(true)
+            {
+                bytes_read = recv(sock, buf, 1024, 0);
+                if(bytes_read <= 0) break;
+                postRequest += buf;
+            }
+
+            if(postRequest.find("\r\n") != std::string::npos)
+            {
+                auto paramsString = postRequest.substr(postRequest.find("\r\n") + 2);
+                const std::string filePathTag = "input_video=";
+                auto posOfFilePath = paramsString.find(filePathTag);
+                if(posOfFilePath !=  std::string::npos)
+                {
+                    auto posOfDelimeter = paramsString.find("&");
+                    if(posOfDelimeter != std::string::npos)
+                    {
+                        auto startOfPath = posOfFilePath + filePathTag.length();
+                        auto fullFilePath = paramsString.substr(startOfPath,
+                                                                posOfDelimeter - startOfPath);
+                        std::cout << "filepath: " << fullFilePath << std::endl;
+                        const std::string brightnessMultiplicatorTag = "brightness_multiplicator=";
+                        auto posOfBrightnessMultiplicator = paramsString.find(brightnessMultiplicatorTag);
+                        if(posOfBrightnessMultiplicator != std::string::npos)
+                        {
+                            auto startOfMultiplicator = posOfBrightnessMultiplicator +
+                                                        brightnessMultiplicatorTag.length();
+                            auto multiplicatorStringValue = paramsString.substr(startOfMultiplicator);
+                            std::cout << "Multiplicator: " << multiplicatorStringValue << std::endl;
+                            //все параметры получены, проверяем наличие файла
+                            if(is_file_exist(fullFilePath.c_str()))//отправляем ОК 200 обратно
+                            {
+                                send(sock, http200_ok, strlen(http200_ok), 0);
+                                //обрабатываем видео
+                                createVideoCollage(fullFilePath, std::stoul(multiplicatorStringValue));
+                            }
+                            else
+                            {
+                                send(sock, http404_not_found, strlen(http404_not_found), 0);
+                            }
+                        }
+                    }
+                }
+            }
+            std::cout.flush();
+            close(sock);
+        }
+}
+//
 int main()
 {
-       unsigned brightnessMultiplier = 3; // тот самый множитель, который мы получаем извне
-       cv::VideoCapture videoFromFile("/home/smak/video_sample.mp4");
-       if(!videoFromFile.isOpened())
-       {
-           std::cout << "Can not open video" << std::endl;
-           return 1;
-       }
-
-       int frameWidth = videoFromFile.get(cv::CAP_PROP_FRAME_WIDTH) * 3;
-       int frameHeight = videoFromFile.get(cv::CAP_PROP_FRAME_HEIGHT);
-       int originalVideoFrameRate = videoFromFile.get(cv::CAP_PROP_FPS);
-       cv::Mat currentFrame;
-       cv::VideoWriter outputVideo("/home/smak/collageVideo.avi",
-                                   cv::VideoWriter::fourcc('M','J','P','G'),originalVideoFrameRate, cv::Size(frameWidth, frameHeight));
-       if(!outputVideo.isOpened())
-       {
-           std::cout << "Can not open video output file" << std::endl;
-           return 1;
-       }
-       while(true) // покадрово
-       {
-           videoFromFile >> currentFrame;
-           if(currentFrame.empty())
-               break;
-           outputVideo << createCollage(currentFrame, brightnessMultiplier);
-       }
-       videoFromFile.release();
-       outputVideo.release();
-       cv::Mat sourceImage;
-       sourceImage = cv::imread("/home/smak/test.jpg");
-
-
-
-       auto resultedCollage = createCollage(sourceImage,brightnessMultiplier);
-       cv::imwrite("/home/smak/collage.jpg", resultedCollage);
-       cv::waitKey();
+       processCommandsFromNetwork();
        return 0;
 }
