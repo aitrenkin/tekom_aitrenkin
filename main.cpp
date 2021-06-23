@@ -91,9 +91,10 @@ int main()
 
        int frameWidth = videoFromFile.get(cv::CAP_PROP_FRAME_WIDTH) * 3;
        int frameHeight = videoFromFile.get(cv::CAP_PROP_FRAME_HEIGHT);
+       int originalVideoFrameRate = videoFromFile.get(cv::CAP_PROP_FPS);
        cv::Mat currentFrame;
-       cv::VideoWriter outputVideo("/home/smak/collageVideo.mp4",
-                                   cv::CAP_FFMPEG,10, cv::Size(frameWidth, frameHeight));
+       cv::VideoWriter outputVideo("/home/smak/collageVideo.avi",
+                                   cv::VideoWriter::fourcc('M','J','P','G'),originalVideoFrameRate, cv::Size(frameWidth, frameHeight));
        if(!outputVideo.isOpened())
        {
            std::cout << "Can not open video output file" << std::endl;
